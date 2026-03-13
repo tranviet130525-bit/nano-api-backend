@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const path = require('path');
 require('dotenv').config();
 
 const User = require('./models/User');
@@ -59,7 +60,8 @@ app.post('/api/user/login', async (req, res) => {
     });
 
   } catch (err) {
-    res.json({ code: 1, msg: 'Lỗi server' });
+    console.error("Login error:", err);
+    res.json({ code: 1, msg: 'Lỗi server: ' + err.message });
   }
 });
 
@@ -74,7 +76,8 @@ app.post('/api/user/register', async (req, res) => {
     const user = await User.create({ username, password });
     res.json({ code: 0, msg: 'Đăng ký thành công', data: null });
   } catch (err) {
-    res.json({ code: 1, msg: 'Lỗi khi đăng ký' });
+    console.error("Register error:", err);
+    res.json({ code: 1, msg: 'Lỗi khi đăng ký: ' + err.message });
   }
 });
 
@@ -95,7 +98,6 @@ app.post('/api/user/password', async (req, res) => {
 });
 
 app.post('/api/user/cdkey', async (req, res) => {
-  // Allow all CDKeys (mock success) to activate account if needed
   res.json({ code: 0, msg: 'Kích hoạt thành công' });
 });
 
@@ -103,17 +105,19 @@ app.post('/api/user/logout', auth, (req, res) => {
   res.json({ code: 0, msg: 'Đăng xuất thành công' });
 });
 
+app.post('/api/user/version', (req, res) => {
+  res.json({ code: 0, data: null });
+});
+
 // ---------------- INFO & HISTORY ----------------- //
 
 app.post('/api/user/info', auth, async (req, res) => {
   try {
     const prompts = await Prompt.find({ userId: req.user._id });
-
-    // Dummy models from backend
     const models = [
-      { id: "BANA-1K", title: "BANA-1K", score: 10, k: 0 },
-      { id: "BANA-1K-2", title: "BANA-1K-2", score: 12, k: 0 },
-      { id: "BANA-4K-PRO", title: "BANA-4K-PRO", score: 30, k: 0 }
+      { id: "BANA-1K", title: "BANA-1K", score: 4, k: 0 },
+      { id: "BANA-1K-2", title: "BANA-1K-2", score: 4, k: 0 },
+      { id: "BANA-4K-PRO", title: "BANA-4K-PRO", score: 10, k: 0 }
     ];
 
     res.json({
@@ -126,7 +130,6 @@ app.post('/api/user/info', auth, async (req, res) => {
         prompt: prompts,
       }
     });
-
   } catch (err) {
     res.json({ code: 1, msg: 'Lỗi server' });
   }
@@ -136,22 +139,19 @@ app.post('/api/user/submit', auth, async (req, res) => {
     try {
         const { model, prompt, images, aspectRatio, filename, left, top, width, height, doc } = req.body;
         
-        // Map model ID to API model name and score cost
         const modelMap = {
-            "BANA-1K": { apiModel: "nano-banana-vip", cost: 10, title: "BANA-1K" },
-            "BANA-1K-2": { apiModel: "gemini-2.5-flash-image-vip", cost: 12, title: "BANA-1K-2" },
-            "BANA-4K-PRO": { apiModel: "gemini-3-pro-image-preview-4k", cost: 30, title: "BANA-4K-PRO" }
+            "BANA-1K": { apiModel: "nano-banana-vip", cost: 4, title: "BANA-1K" },
+            "BANA-1K-2": { apiModel: "gemini-2.5-flash-image-vip", cost: 4, title: "BANA-1K-2" },
+            "BANA-4K-PRO": { apiModel: "gemini-3-pro-image-preview-4k", cost: 10, title: "BANA-4K-PRO" }
         };
 
         const modelInfo = modelMap[model] || modelMap["BANA-1K"];
 
-        // Check score
         if (req.user.score < modelInfo.cost) {
             return res.json({ code: 1, msg: "Không đủ số dư, vui lòng nạp thêm điểm!" });
         }
 
-        // Prepare request to APICore
-        const apiKey = "sk-y7hN7iNoM89bxIwtjspJtUZLtGCP9yNYdiqySLKzmUAEpgmc"; // from plugin config
+        const apiKey = "sk-y7hN7iNoM89bxIwtjspJtUZLtGCP9yNYdiqySLKzmUAEpgmc"; 
         const apiUrl = "https://api.apicore.ai/v1/chat/completions";
 
         const apiPayload = {
@@ -187,21 +187,16 @@ app.post('/api/user/submit', auth, async (req, res) => {
         const elapsedSeconds = Math.round((Date.now() - startTime) / 1000);
 
         if (!response.ok) {
-            console.log("API Error:", resultData);
             return res.json({ code: 1, msg: "Lỗi từ APICore: " + (resultData.error?.message || "Unknown error") });
         }
 
-        // Extract URL 
         const content = resultData.choices[0].message.content;
         let imageUrl = content;
         
-        // markdown format (![alt](url))
         const match = content.match(/!\[.*?\]\((.*?)\)/);
         if (match && match[1]) {
             imageUrl = match[1];
-        } 
-        // JSON format fallback
-        else if (content.startsWith("{")) {
+        } else if (content.startsWith("{")) {
             try {
                const parsed = JSON.parse(content);
                if (parsed.url) imageUrl = parsed.url;
@@ -209,14 +204,11 @@ app.post('/api/user/submit', auth, async (req, res) => {
             } catch(e) {}
         }
 
-        // Remove html/markdown residue if any
         if (imageUrl.includes("](")) imageUrl = imageUrl.split("](")[1].split(")")[0];
 
-        // Deduct score
         req.user.score -= modelInfo.cost;
         await req.user.save();
 
-        // Save history 
         await History.create({
             userId: req.user._id,
             model_title: modelInfo.title,
@@ -241,9 +233,18 @@ app.post('/api/user/submit', auth, async (req, res) => {
     }
 });
 
+app.post('/api/user/history/info', auth, async (req, res) => {
+    try {
+        const history = await History.find({ userId: req.user._id }).sort({ _id: -1 }).limit(50);
+        res.json({ code: 0, msg: 'success', data: history });
+    } catch (err) {
+        res.json({ code: 1, msg: 'Lỗi lấy lịch sử' });
+    }
+});
+
 app.post('/api/user/history/del', auth, async (req, res) => {
   try {
-    const { id } = req.body; // array of string ids, or single string id
+    const { id } = req.body;
     if (Array.isArray(id)) {
         await History.deleteMany({ _id: { $in: id }, userId: req.user._id });
     } else if (id) {
@@ -251,7 +252,6 @@ app.post('/api/user/history/del', auth, async (req, res) => {
     } else {
         await History.deleteMany({ userId: req.user._id });
     }
-    
     res.json({ code: 0, msg: 'Xóa thành công' });
   } catch (err) {
     res.json({ code: 1, msg: 'Lỗi khi xóa' });
@@ -280,9 +280,7 @@ app.post('/api/user/prompt/del', auth, async (req, res) => {
 
 // ---------------- BILLING ----------------- //
 
-// Mock pay/add
 app.post('/api/user/pay/add', auth, async (req, res) => {
-    // Return dummy QR URL and trade no
     res.json({ 
         code: 0, 
         msg: 'success', 
@@ -291,121 +289,53 @@ app.post('/api/user/pay/add', auth, async (req, res) => {
     });
 });
 
-// Mock pay/res
 app.post('/api/user/pay/res', auth, async (req, res) => {
-    // Increase user score freely on any QR check
-    req.user.score += 10000;
+    req.user.score += 1000;
     await req.user.save();
     res.json({ code: 0, msg: 'Nạp tiền thành công' });
 });
 
-// ---------------- MISC ----------------- //
+// ---------------- ADMIN ROUTES ----------------- //
 
-app.post('/api/user/version', (req, res) => {
-    res.json({ code: 0, data: null }); // return null so it doesn't prompt an update
+app.post('/api/admin/login', async (req, res) => {
+   if (req.body.password === (process.env.ADMIN_PASSWORD || 'admin123')) {
+       res.json({ code: 0, token: 'admin-token' });
+   } else {
+       res.json({ code: 1, msg: 'Sai mật khẩu quản trị' });
+   }
 });
 
-app.post('/api/user/submit', auth, async (req, res) => {
-    try {
-        const { model, prompt, images, aspectRatio, filename } = req.body;
-        
-        // Map model ID to API model name and score cost
-        const modelMap = {
-            "BANA-1K": { apiModel: "nano-banana-vip", cost: 10 },
-            "BANA-1K-2": { apiModel: "gemini-2.5-flash-image-vip", cost: 12 },
-            "BANA-4K-PRO": { apiModel: "gemini-3-pro-image-preview-4k", cost: 30 }
-        };
+const adminAuth = (req, res, next) => {
+   const token = req.headers['authorization'];
+   if (token === 'Bearer admin-token') next();
+   else res.json({ code: 1, msg: 'Không có quyền truy cập' });
+};
 
-        const modelInfo = modelMap[model] || modelMap["BANA-1K"];
+app.get('/api/admin/users', adminAuth, async (req, res) => {
+   try {
+       const users = await User.find().select('-password').sort({ createdAt: -1 });
+       res.json({ code: 0, data: users });
+   } catch (error) {
+       res.json({ code: 1, msg: 'Lỗi lấy danh sách user' });
+   }
+});
 
-        // Check score
-        if (req.user.score < modelInfo.cost) {
-            return res.json({ code: 1, msg: "Không đủ số dư, vui lòng nạp thêm điểm!" });
-        }
+app.post('/api/admin/user/score', adminAuth, async (req, res) => {
+   try {
+       const { userId, score } = req.body;
+       await User.findByIdAndUpdate(userId, { score });
+       res.json({ code: 0, msg: 'Cập nhật điểm thành công' });
+   } catch (error) {
+       res.json({ code: 1, msg: 'Lỗi cập nhật điểm' });
+   }
+});
 
-        // Prepare request to APICore
-        const apiKey = "sk-y7hN7iNoM89bxIwtjspJtUZLtGCP9yNYdiqySLKzmUAEpgmc"; // from plugin config
-        const apiUrl = "https://api.apicore.ai/v1/chat/completions";
-
-        const apiPayload = {
-            model: modelInfo.apiModel,
-            messages: [
-                {
-                    role: "user",
-                    content: [
-                        { type: "text", text: prompt + " --ar " + aspectRatio }
-                    ]
-                }
-            ]
-        };
-
-        if (images && images.length > 0) {
-            apiPayload.messages[0].content.push({
-                type: "image_url",
-                image_url: { url: images[0] }
-            });
-        }
-
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(apiPayload)
-        });
-
-        const resultData = await response.json();
-
-        if (!response.ok) {
-            console.log("API Error:", resultData);
-            return res.json({ code: 1, msg: "Lỗi từ APICore: " + (resultData.error?.message || "Unknown error") });
-        }
-
-        // Extract URL 
-        const content = resultData.choices[0].message.content;
-        let imageUrl = content;
-        
-        // markdown format (![alt](url))
-        const match = content.match(/!\[.*?\]\((.*?)\)/);
-        if (match && match[1]) {
-            imageUrl = match[1];
-        } 
-        // JSON format fallback
-        else if (content.startsWith("{")) {
-            try {
-               const parsed = JSON.parse(content);
-               if (parsed.url) imageUrl = parsed.url;
-               else if (parsed.image) imageUrl = parsed.image;
-            } catch(e) {}
-        }
-
-        // Deduct score
-        req.user.score -= modelInfo.cost;
-        await req.user.save();
-
-        // Save history (We only save the result URL to avoid inflating DB with Base64)
-        await History.create({
-            userId: req.user._id,
-            img1: "Image Uploaded", 
-            text: prompt,
-            type: modelInfo.apiModel,
-            result: imageUrl,
-            score: modelInfo.cost,
-            status: 2
-        });
-
-        res.json({ code: 0, msg: "success", data: imageUrl });
-
-    } catch (error) {
-        console.error("Submit error:", error);
-        res.json({ code: 1, msg: "Có lỗi xảy ra: " + error.message });
-    }
+app.get('/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
 app.get('*', (req, res) => res.send('Nano Server is running!'));
 
-// For local testing
 if (process.env.NODE_ENV !== 'production') {
   app.listen(3001, () => console.log('Server running locally on port 3001'));
 }
