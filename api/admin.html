@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nano Admin Panel</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body class="text-gray-800 h-screen flex flex-col items-center justify-center">
+
+    <!-- Login Section -->
+    <div id="loginSection" class="bg-white p-8 rounded-lg shadow-md w-96">
+        <h2 class="text-2xl font-bold mb-6 text-center text-blue-600">Admin Login</h2>
+        <input type="password" id="adminPassword" placeholder="Nhập mật khẩu Admin" 
+               class="w-full border border-gray-300 p-3 rounded mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <button onclick="login()" class="w-full bg-blue-600 text-white p-3 rounded hover:bg-blue-700 font-semibold transition">Đăng Nhập</button>
+        <p id="loginError" class="text-red-500 text-sm mt-3 text-center hidden"></p>
+    </div>
+
+    <!-- Admin Dashboard -->
+    <div id="dashboardSection" class="hidden container mx-auto p-4 w-full h-full flex flex-col">
+        <div class="flex justify-between items-center bg-white p-4 shadow rounded-md mb-6">
+            <h1 class="text-2xl font-bold text-gray-700">Quản Lý Users Nano Plugin</h1>
+            <button onclick="logout()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded">Đăng xuất</button>
+        </div>
+
+        <div class="bg-white shadow rounded-lg flex-1 overflow-auto">
+            <table class="min-w-full leading-normal">
+                <thead>
+                    <tr>
+                        <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Username</th>
+                        <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Điểm (Score)</th>
+                        <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Chức năng</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                    <!-- Users will be loaded here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let adminToken = localStorage.getItem('adminToken');
+        if (adminToken) {
+            showDashboard();
+        }
+
+        async function login() {
+            const pwd = document.getElementById('adminPassword').value;
+            const res = await fetch('/api/admin/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: pwd })
+            });
+            const data = await res.json();
+            if (data.code === 0) {
+                adminToken = data.token;
+                localStorage.setItem('adminToken', data.token);
+                document.getElementById('loginError').classList.add('hidden');
+                showDashboard();
+            } else {
+                document.getElementById('loginError').innerText = data.msg;
+                document.getElementById('loginError').classList.remove('hidden');
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('adminToken');
+            adminToken = null;
+            document.getElementById('dashboardSection').classList.add('hidden');
+            document.getElementById('loginSection').classList.remove('hidden');
+        }
+
+        async function showDashboard() {
+            document.getElementById('loginSection').classList.add('hidden');
+            document.getElementById('dashboardSection').classList.remove('hidden');
+            
+            // Load users
+            const res = await fetch('/api/admin/users', {
+                headers: { 'Authorization': 'Bearer ' + adminToken }
+            });
+            const data = await res.json();
+            
+            if (data.code !== 0) {
+                logout();
+                return;
+            }
+
+            const tbody = document.getElementById('usersTableBody');
+            tbody.innerHTML = '';
+            
+            data.data.forEach(user => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
+                        <p class="text-gray-900 whitespace-nowrap">${user.username}</p>
+                        <p class="text-gray-400 text-xs">${user._id}</p>
+                    </td>
+                    <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
+                        <input type="number" id="score_${user._id}" value="${user.score}" class="border border-gray-300 p-2 rounded w-24">
+                    </td>
+                    <td class="px-5 py-5 border-b border-gray-200 bg-white text-sm">
+                        <button onclick="updateScore('${user._id}')" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded">Lưu điểm</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function updateScore(userId) {
+            const score = document.getElementById('score_' + userId).value;
+            const res = await fetch('/api/admin/user/score', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + adminToken
+                },
+                body: JSON.stringify({ userId, score: parseInt(score) })
+            });
+            const data = await res.json();
+            if (data.code === 0) {
+                alert('Đã cập nhật điểm thành công!');
+            } else {
+                alert('Lỗi: ' + data.msg);
+            }
+        }
+    </script>
+</body>
+</html>

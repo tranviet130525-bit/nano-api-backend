@@ -59,7 +59,8 @@ app.post('/api/user/login', async (req, res) => {
     });
 
   } catch (err) {
-    res.json({ code: 1, msg: 'Lỗi server' });
+    console.error("Login error:", err);
+    res.json({ code: 1, msg: 'Lỗi server: ' + err.message });
   }
 });
 
@@ -74,7 +75,8 @@ app.post('/api/user/register', async (req, res) => {
     const user = await User.create({ username, password });
     res.json({ code: 0, msg: 'Đăng ký thành công', data: null });
   } catch (err) {
-    res.json({ code: 1, msg: 'Lỗi khi đăng ký' });
+    console.error("Register error:", err);
+    res.json({ code: 1, msg: 'Lỗi khi đăng ký: ' + err.message });
   }
 });
 
@@ -111,9 +113,9 @@ app.post('/api/user/info', auth, async (req, res) => {
 
     // Dummy models from backend
     const models = [
-      { id: "BANA-1K", title: "BANA-1K", score: 10, k: 0 },
-      { id: "BANA-1K-2", title: "BANA-1K-2", score: 12, k: 0 },
-      { id: "BANA-4K-PRO", title: "BANA-4K-PRO", score: 30, k: 0 }
+      { id: "BANA-1K", title: "BANA-1K", score: 4, k: 0 },
+      { id: "BANA-1K-2", title: "BANA-1K-2", score: 4, k: 0 },
+      { id: "BANA-4K-PRO", title: "BANA-4K-PRO", score: 10, k: 0 }
     ];
 
     res.json({
@@ -138,9 +140,9 @@ app.post('/api/user/submit', auth, async (req, res) => {
         
         // Map model ID to API model name and score cost
         const modelMap = {
-            "BANA-1K": { apiModel: "nano-banana-vip", cost: 10, title: "BANA-1K" },
-            "BANA-1K-2": { apiModel: "gemini-2.5-flash-image-vip", cost: 12, title: "BANA-1K-2" },
-            "BANA-4K-PRO": { apiModel: "gemini-3-pro-image-preview-4k", cost: 30, title: "BANA-4K-PRO" }
+            "BANA-1K": { apiModel: "nano-banana-vip", cost: 4, title: "BANA-1K" },
+            "BANA-1K-2": { apiModel: "gemini-2.5-flash-image-vip", cost: 4, title: "BANA-1K-2" },
+            "BANA-4K-PRO": { apiModel: "gemini-3-pro-image-preview-4k", cost: 10, title: "BANA-4K-PRO" }
         };
 
         const modelInfo = modelMap[model] || modelMap["BANA-1K"];
@@ -294,9 +296,49 @@ app.post('/api/user/pay/add', auth, async (req, res) => {
 // Mock pay/res
 app.post('/api/user/pay/res', auth, async (req, res) => {
     // Increase user score freely on any QR check
-    req.user.score += 10000;
+    req.user.score += 1000;
     await req.user.save();
     res.json({ code: 0, msg: 'Nạp tiền thành công' });
+});
+
+// ---------------- ADMIN ROUTES ----------------- //
+
+app.post('/api/admin/login', async (req, res) => {
+   if (req.body.password === (process.env.ADMIN_PASSWORD || 'admin123')) {
+       res.json({ code: 0, token: 'admin-token' });
+   } else {
+       res.json({ code: 1, msg: 'Sai mật khẩu quản trị' });
+   }
+});
+
+const adminAuth = (req, res, next) => {
+   const token = req.headers['authorization'];
+   if (token === 'Bearer admin-token') next();
+   else res.json({ code: 1, msg: 'Không có quyền truy cập' });
+};
+
+app.get('/api/admin/users', adminAuth, async (req, res) => {
+   try {
+       const users = await User.find().select('-password').sort({ createdAt: -1 });
+       res.json({ code: 0, data: users });
+   } catch (error) {
+       res.json({ code: 1, msg: 'Lỗi lấy danh sách user' });
+   }
+});
+
+app.post('/api/admin/user/score', adminAuth, async (req, res) => {
+   try {
+       const { userId, score } = req.body;
+       await User.findByIdAndUpdate(userId, { score });
+       res.json({ code: 0, msg: 'Cập nhật điểm thành công' });
+   } catch (error) {
+       res.json({ code: 1, msg: 'Lỗi cập nhật điểm' });
+   }
+});
+
+const path = require('path');
+app.get('/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
 // ---------------- MISC ----------------- //
