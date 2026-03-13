@@ -210,8 +210,101 @@ app.post('/api/user/version', (req, res) => {
 });
 
 app.post('/api/user/submit', auth, async (req, res) => {
-    // Optional endpoint if the plugin uploads logs to server. Just return success here.
-    res.json({ code: 0, msg: 'success' });
+    try {
+        const { model, prompt, images, aspectRatio, filename } = req.body;
+        
+        // Map model ID to API model name and score cost
+        const modelMap = {
+            "BANA-1K": { apiModel: "nano-banana-vip", cost: 10 },
+            "BANA-1K-2": { apiModel: "gemini-2.5-flash-image-vip", cost: 12 },
+            "BANA-4K-PRO": { apiModel: "gemini-3-pro-image-preview-4k", cost: 30 }
+        };
+
+        const modelInfo = modelMap[model] || modelMap["BANA-1K"];
+
+        // Check score
+        if (req.user.score < modelInfo.cost) {
+            return res.json({ code: 1, msg: "Không đủ số dư, vui lòng nạp thêm điểm!" });
+        }
+
+        // Prepare request to APICore
+        const apiKey = "sk-y7hN7iNoM89bxIwtjspJtUZLtGCP9yNYdiqySLKzmUAEpgmc"; // from plugin config
+        const apiUrl = "https://api.apicore.ai/v1/chat/completions";
+
+        const apiPayload = {
+            model: modelInfo.apiModel,
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: prompt + " --ar " + aspectRatio }
+                    ]
+                }
+            ]
+        };
+
+        if (images && images.length > 0) {
+            apiPayload.messages[0].content.push({
+                type: "image_url",
+                image_url: { url: images[0] }
+            });
+        }
+
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(apiPayload)
+        });
+
+        const resultData = await response.json();
+
+        if (!response.ok) {
+            console.log("API Error:", resultData);
+            return res.json({ code: 1, msg: "Lỗi từ APICore: " + (resultData.error?.message || "Unknown error") });
+        }
+
+        // Extract URL 
+        const content = resultData.choices[0].message.content;
+        let imageUrl = content;
+        
+        // markdown format (![alt](url))
+        const match = content.match(/!\[.*?\]\((.*?)\)/);
+        if (match && match[1]) {
+            imageUrl = match[1];
+        } 
+        // JSON format fallback
+        else if (content.startsWith("{")) {
+            try {
+               const parsed = JSON.parse(content);
+               if (parsed.url) imageUrl = parsed.url;
+               else if (parsed.image) imageUrl = parsed.image;
+            } catch(e) {}
+        }
+
+        // Deduct score
+        req.user.score -= modelInfo.cost;
+        await req.user.save();
+
+        // Save history (We only save the result URL to avoid inflating DB with Base64)
+        await History.create({
+            userId: req.user._id,
+            img1: "Image Uploaded", 
+            text: prompt,
+            type: modelInfo.apiModel,
+            result: imageUrl,
+            score: modelInfo.cost,
+            status: 2
+        });
+
+        res.json({ code: 0, msg: "success", data: imageUrl });
+
+    } catch (error) {
+        console.error("Submit error:", error);
+        res.json({ code: 1, msg: "Có lỗi xảy ra: " + error.message });
+    }
 });
 
 app.get('*', (req, res) => res.send('Nano Server is running!'));
