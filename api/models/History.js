@@ -6,17 +6,18 @@ const historySchema = new mongoose.Schema({
     ref: 'User',
     required: true,
   },
-  // the plugin expects: id, img1, text, type, result, score, status, intime
-  img1: String, // original image
-  text: String, // prompt used
-  type: String, // type of generation
-  result: String, // result image URL
-  score: Number, // cost
-  status: { type: Number, default: 2 }, // 2 = success
-  intime: {
-    type: Date,
-    default: Date.now,
-  }
+  model_title: String,
+  score: Number,
+  status: { type: Number, default: 0 }, // 0 = success, 1 = failure, 2 = generating
+  created_at: String,
+  seconds: { type: Number, default: 0 },
+  filename: String,
+  left: Number,
+  top: Number,
+  width: Number,
+  height: Number,
+  img: String, // result image URL
+  doc: String
 });
 
 const History = mongoose.model('History', historySchema);
